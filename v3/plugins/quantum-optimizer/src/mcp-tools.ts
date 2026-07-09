@@ -153,12 +153,14 @@ async function annealingSolveHandler(
         iterations: result.solution.iterations,
         confidence: result.solution.confidence,
       },
-      samples: result.samples.slice(0, 10).map(s => ({
-        assignment: Array.from(s.assignment),
-        energy: s.energy,
-      })),
-      timing: result.timing,
-      energyHistogram: Object.fromEntries(result.energyHistogram),
+      details: {
+        samples: result.samples.slice(0, 10).map(s => ({
+          assignment: Array.from(s.assignment),
+          energy: s.energy,
+        })),
+        timing: result.timing,
+        energyHistogram: Object.fromEntries(result.energyHistogram),
+      },
     });
   } catch (error) {
     logger.error('Annealing failed', { error: error instanceof Error ? error.message : String(error) });
@@ -255,12 +257,14 @@ async function qaoaOptimizeHandler(
         optimal: result.solution.optimal,
         confidence: result.solution.confidence,
       },
-      parameters: {
-        gamma: Array.from(result.parameters.gamma),
-        beta: Array.from(result.parameters.beta),
+      details: {
+        parameters: {
+          gamma: Array.from(result.parameters.gamma),
+          beta: Array.from(result.parameters.beta),
+        },
+        approximationRatio: result.approximationRatio,
+        convergence: Array.from(result.convergence),
       },
-      approximationRatio: result.approximationRatio,
-      convergence: Array.from(result.convergence),
     });
   } catch (error) {
     logger.error('QAOA failed', { error: error instanceof Error ? error.message : String(error) });
@@ -353,10 +357,12 @@ async function groverSearchHandler(
 
     return successResult({
       solutions: result.solutions.map(s => Array.from(s)),
-      queries: result.queries,
-      optimalQueries: result.optimalQueries,
-      successProbability: result.successProbability,
-      speedup: result.optimalQueries / (result.queries || 1),
+      details: {
+        queries: result.queries,
+        optimalQueries: result.optimalQueries,
+        successProbability: result.successProbability,
+        speedup: result.optimalQueries / (result.queries || 1),
+      },
     });
   } catch (error) {
     logger.error('Grover search failed', { error: error instanceof Error ? error.message : String(error) });
@@ -417,6 +423,10 @@ async function dependencyResolveHandler(
     const data = validationResult.data;
     logger.debug('Dependency resolve', { packages: data.packages.length, solver: data.solver });
 
+    if (data.packages.length === 0) {
+      return errorResult('packages array must not be empty');
+    }
+
     const bridge = await getDagBridge();
     const result = await bridge.resolveDependencies(data.packages, {
       minimize: data.constraints?.minimize ?? 'versions',
@@ -434,10 +444,12 @@ async function dependencyResolveHandler(
 
     return successResult({
       resolved: result.resolved,
-      installOrder: result.order,
-      resolvedConflicts: result.resolvedConflicts,
-      totalSize: result.totalSize,
-      vulnerabilities: result.vulnerabilities,
+      details: {
+        installationOrder: result.order,
+        resolvedConflicts: result.resolvedConflicts,
+        totalSize: result.totalSize,
+        vulnerabilities: result.vulnerabilities,
+      },
     });
   } catch (error) {
     logger.error('Dependency resolution failed', { error: error instanceof Error ? error.message : String(error) });
@@ -505,6 +517,13 @@ async function scheduleOptimizeHandler(
     const data = validationResult.data;
     logger.debug('Schedule optimize', { tasks: data.tasks.length, resources: data.resources.length });
 
+    if (data.tasks.length === 0) {
+      return errorResult('tasks array must not be empty');
+    }
+    if (data.resources.length === 0) {
+      return errorResult('resources array must not be empty');
+    }
+
     const bridge = await getDagBridge();
     const result = await bridge.optimizeSchedule(data.tasks, data.resources, data.objective);
 
@@ -518,11 +537,13 @@ async function scheduleOptimizeHandler(
 
     return successResult({
       schedule: result.schedule,
-      makespan: result.makespan,
-      cost: result.cost,
-      utilization: result.utilization,
-      criticalPath: result.criticalPath,
-      score: result.score,
+      details: {
+        makespan: result.makespan,
+        cost: result.cost,
+        utilization: result.utilization,
+        criticalPath: result.criticalPath,
+        score: result.score,
+      },
     });
   } catch (error) {
     logger.error('Schedule optimization failed', { error: error instanceof Error ? error.message : String(error) });

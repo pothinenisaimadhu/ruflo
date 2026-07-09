@@ -25,6 +25,7 @@
 	import { shareModal } from "$lib/stores/shareModal";
 	import BackgroundGenerationPoller from "$lib/components/BackgroundGenerationPoller.svelte";
 	import { requireAuthUser } from "$lib/utils/auth";
+	import WorkspaceExplorer from "$lib/components/WorkspaceExplorer.svelte";
 
 	let { data = $bindable(), children } = $props();
 
@@ -39,20 +40,18 @@
 	});
 
 	let isNavCollapsed = $state(false);
+	let showWorkspace = $state(false);
 
 	let errorToastTimeout: ReturnType<typeof setTimeout>;
 	let currentError: string | undefined = $state();
 
 	async function onError() {
-		// If a new different error comes, wait for the current error to hide first
 		if ($error && currentError && $error !== currentError) {
 			clearTimeout(errorToastTimeout);
 			currentError = undefined;
 			await new Promise((resolve) => setTimeout(resolve, 300));
 		}
-
 		currentError = $error;
-
 		errorToastTimeout = setTimeout(() => {
 			$error = undefined;
 			currentError = undefined;
@@ -72,7 +71,6 @@
 			.then(handleResponse)
 			.then(async () => {
 				conversations = conversations.filter((conv) => conv.id !== id);
-
 				if (page.params.id === id) {
 					await goto(`${base}/`, { invalidateAll: true });
 				}
@@ -113,11 +111,9 @@
 	$effect(() => {
 		if ($titleUpdate) {
 			const convIdx = conversations.findIndex(({ id }) => id === $titleUpdate?.convId);
-
 			if (convIdx != -1) {
 				conversations[convIdx].title = $titleUpdate?.title ?? conversations[convIdx].title;
 			}
-
 			$titleUpdate = null;
 		}
 	});
@@ -135,9 +131,7 @@
 				.then((userData) => {
 					isPro.set(userData.isPro ?? false);
 				})
-				.catch(() => {
-					// Keep isPro as null on error - don't show any badge if status is unknown
-				});
+				.catch(() => {});
 		}
 
 		if (page.url.searchParams.has("model")) {
@@ -148,15 +142,12 @@
 				.then(async () => {
 					const query = new URLSearchParams(page.url.searchParams.toString());
 					query.delete("model");
-					await goto(`${base}/?${query.toString()}`, {
-						invalidateAll: true,
-					});
+					await goto(`${base}/?${query.toString()}`, { invalidateAll: true });
 				});
 		}
 
 		if (page.url.searchParams.has("token")) {
 			const token = page.url.searchParams.get("token");
-
 			await fetch(`${base}/api/user/validate-token`, {
 				method: "POST",
 				body: JSON.stringify({ token }),
@@ -165,12 +156,9 @@
 			});
 		}
 
-		// Global keyboard shortcut: New Chat (Ctrl/Cmd + Shift + O)
 		const onKeydown = (e: KeyboardEvent) => {
-			// Ignore when a modal has focus (app is inert)
 			const appEl = document.getElementById("app");
 			if (appEl?.hasAttribute("inert")) return;
-
 			const oPressed = e.key?.toLowerCase() === "o";
 			const metaOrCtrl = e.metaKey || e.ctrlKey;
 			if (oPressed && e.shiftKey && metaOrCtrl) {
@@ -191,7 +179,6 @@
 			: conversations.find((conv) => conv.id === page.params.id)?.title
 	);
 
-	// Show the welcome modal once on first app load
 	let showWelcome = $derived(
 		!$settings.welcomeModalSeen &&
 			!(page.data.shared === true && page.route.id?.startsWith("/conversation/"))
@@ -203,16 +190,11 @@
 	<meta name="description" content={publicConfig.PUBLIC_APP_DESCRIPTION} />
 	<meta name="twitter:site" content="@huggingface" />
 
-	<!-- use those meta tags everywhere except on special listing pages -->
-	<!-- feel free to refacto if there's a better way -->
 	{#if !page.url.pathname.includes("/models/")}
 		<meta name="twitter:card" content="summary_large_image" />
 		<meta name="twitter:title" content="{publicConfig.PUBLIC_APP_NAME} - Chat with AI models" />
 		<meta name="twitter:description" content={publicConfig.PUBLIC_APP_DESCRIPTION} />
-		<meta
-			name="twitter:image"
-			content="{publicConfig.assetPath}/thumbnail.png"
-		/>
+		<meta name="twitter:image" content="{publicConfig.assetPath}/thumbnail.png" />
 		<meta name="twitter:image:alt" content="{publicConfig.PUBLIC_APP_NAME} preview" />
 		<meta property="og:title" content="{publicConfig.PUBLIC_APP_NAME} - Chat with AI models" />
 		<meta property="og:type" content="website" />
@@ -257,6 +239,7 @@
 
 <BackgroundGenerationPoller />
 
+<!-- Main app grid — nav + content -->
 <div
 	class="fixed grid h-dvh w-screen grid-cols-1 grid-rows-[auto,1fr] overflow-hidden text-smd {!isNavCollapsed
 		? 'md:grid-cols-[290px,1fr]'
@@ -289,6 +272,7 @@
 			user={data.user}
 			ondeleteConversation={(id) => deleteConversation(id)}
 			oneditConversationTitle={(payload) => editConversationTitle(payload.id, payload.title)}
+			onopenWorkspace={() => (showWorkspace = true)}
 		/>
 	</MobileNav>
 	<nav
@@ -299,26 +283,18 @@
 			user={data.user}
 			ondeleteConversation={(id) => deleteConversation(id)}
 			oneditConversationTitle={(payload) => editConversationTitle(payload.id, payload.title)}
+			onopenWorkspace={() => (showWorkspace = true)}
 		/>
 	</nav>
+
 	{#if currentError}
 		<Toast message={currentError} />
 	{/if}
-	{@render children?.()}
 
-	{#if publicConfig.PUBLIC_PLAUSIBLE_SCRIPT_URL}
-		<script>
-			(window.plausible =
-				window.plausible ||
-				function () {
-					(plausible.q = plausible.q || []).push(arguments);
-				}),
-				(plausible.init =
-					plausible.init ||
-					function (i) {
-						plausible.o = i || {};
-					});
-			plausible.init();
-		</script>
-	{/if}
+	{@render children?.()}
 </div>
+
+<!-- Workspace Explorer — rendered at root so it covers the full viewport -->
+{#if showWorkspace}
+	<WorkspaceExplorer onclose={() => (showWorkspace = false)} />
+{/if}

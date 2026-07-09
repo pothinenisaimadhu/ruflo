@@ -1,0 +1,13 @@
+[eval]:1
+const {spawn}=require('child_process');const p=spawn('node',['/usr/local/lib/node_modules/agentic-flow/dist/mcp/standalone-stdio.js'],{stdio:['pipe','pipe','pipe']});let buf='';p.stdout.on('data',d==d;process.stderr.write('[OUT]'+d)});p.stderr.on('data',d=;setTimeout(()= msg=JSON.stringify({jsonrpc:'2.0',id:'1',method:'initialize',params:{protocolVersion:'2024-11-05',capabilities:{},clientInfo:{name:'test',version:'1.0'}}})+'\n';process.stderr.write('[SEND]'+msg);p.stdin.write(msg)},3500);setTimeout(()=;p.kill();process.exit(0)},8000)
+                                                                                                                                                                                                       ^
+
+SyntaxError: missing ) after argument list
+    at makeContextifyScript (node:internal/vm:185:14)
+    at node:internal/process/execution:107:22
+    at [eval]-wrapper:6:24
+    at runScript (node:internal/process/execution:101:62)
+    at evalScript (node:internal/process/execution:133:3)
+    at node:internal/main/eval_string:51:3
+
+Node.js v20.20.2

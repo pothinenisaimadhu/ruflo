@@ -26,6 +26,7 @@ import {
   type MemoryBackendFactory,
   type HookDefinition,
   type HookHandler,
+  type HookContext,
   type WorkerDefinition,
   type WorkerType,
   type LLMProviderDefinition,
@@ -89,6 +90,11 @@ export class PluginBuilder {
     return this;
   }
 
+  withName(name: string): this {
+    this.metadata = { ...this.metadata, name };
+    return this;
+  }
+
   withAuthor(author: string): this {
     this.metadata = { ...this.metadata, author };
     return this;
@@ -116,6 +122,16 @@ export class PluginBuilder {
 
   withMinCoreVersion(minCoreVersion: string): this {
     this.metadata = { ...this.metadata, minCoreVersion };
+    return this;
+  }
+
+  withId(id: string): this {
+    this.metadata = { ...this.metadata, id };
+    return this;
+  }
+
+  withCapabilities(capabilities: string[]): this {
+    this.metadata = { ...this.metadata, capabilities } as PluginMetadata & { capabilities: string[] };
     return this;
   }
 
@@ -176,8 +192,8 @@ export class PluginBuilder {
   // Build
   // =========================================================================
 
-  build(): IPlugin {
-    return createSimplePlugin({
+  build(): IPlugin & { tools: MCPToolDefinition[]; hooks: HookDefinition[] } {
+    const plugin = createSimplePlugin({
       metadata: this.metadata,
       onInitialize: this.initHandler,
       onShutdown: this.shutdownHandler,
@@ -188,6 +204,12 @@ export class PluginBuilder {
       hooks: this.hooks.length > 0 ? this.hooks : undefined,
       workers: this.workers.length > 0 ? this.workers : undefined,
       providers: this.providers.length > 0 ? this.providers : undefined,
+    });
+
+    // Expose tools and hooks as direct properties for test compatibility
+    return Object.assign(plugin, {
+      tools: [...this.mcpTools],
+      hooks: [...this.hooks],
     });
   }
 
@@ -401,6 +423,7 @@ export class HookBuilder {
   private priority: HookPriority = HookPriority.Normal;
   private async: boolean = true;
   private handler?: HookHandler;
+  private conditions: Array<(context: HookContext) => boolean> = [];
 
   constructor(event: HookEvent) {
     this.event = event;
@@ -426,6 +449,16 @@ export class HookBuilder {
     return this;
   }
 
+  when(condition: (context: HookContext) => boolean): this {
+    this.conditions.push(condition);
+    return this;
+  }
+
+  handle(handler: HookHandler): this {
+    this.handler = handler;
+    return this;
+  }
+
   withHandler(handler: HookHandler): this {
     this.handler = handler;
     return this;
@@ -436,9 +469,21 @@ export class HookBuilder {
       throw new Error(`Hook for event ${this.event} requires a handler`);
     }
 
+    const originalHandler = this.handler;
+    const conditions = this.conditions;
+
+    const wrappedHandler: HookHandler = async (context: HookContext) => {
+      for (const condition of conditions) {
+        if (!condition(context)) {
+          return { success: true, data: context.data };
+        }
+      }
+      return originalHandler(context);
+    };
+
     return {
       event: this.event,
-      handler: this.handler,
+      handler: wrappedHandler,
       priority: this.priority,
       name: this.name,
       description: this.description,

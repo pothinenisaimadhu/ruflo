@@ -17,6 +17,7 @@ export type PluginLifecycleState =
   | 'error';
 
 export interface PluginMetadata {
+  readonly id?: string;
   readonly name: string;
   readonly version: string;
   readonly description?: string;
@@ -258,43 +259,44 @@ export interface WorkerHealth {
 
 export enum HookEvent {
   // Tool lifecycle
-  PreToolUse = 'hook:pre-tool-use',
-  PostToolUse = 'hook:post-tool-use',
+  PreToolUse = 'PreToolUse',
+  PostToolUse = 'PostToolUse',
+  PostToolCall = 'PostToolCall',
 
   // Session lifecycle
-  SessionStart = 'hook:session-start',
-  SessionEnd = 'hook:session-end',
-  SessionRestore = 'hook:session-restore',
+  SessionStart = 'SessionStart',
+  SessionEnd = 'SessionEnd',
+  SessionRestore = 'SessionRestore',
 
   // Task execution
-  PreTaskExecute = 'hook:pre-task-execute',
-  PostTaskComplete = 'hook:post-task-complete',
-  TaskFailed = 'hook:task-failed',
+  PreTaskExecute = 'PreTaskExecute',
+  PostTaskComplete = 'PostTaskComplete',
+  TaskFailed = 'TaskFailed',
 
   // File operations
-  PreFileWrite = 'hook:pre-file-write',
-  PostFileWrite = 'hook:post-file-write',
-  PreFileDelete = 'hook:pre-file-delete',
+  PreFileWrite = 'PreFileWrite',
+  PostFileWrite = 'PostFileWrite',
+  PreFileDelete = 'PreFileDelete',
 
   // Command execution
-  PreCommand = 'hook:pre-command',
-  PostCommand = 'hook:post-command',
+  PreCommand = 'PreCommand',
+  PostCommand = 'PostCommand',
 
   // Agent operations
-  AgentSpawned = 'hook:agent-spawned',
-  AgentTerminated = 'hook:agent-terminated',
+  AgentSpawned = 'AgentSpawned',
+  AgentTerminated = 'AgentTerminated',
 
   // Memory operations
-  PreMemoryStore = 'hook:pre-memory-store',
-  PostMemoryStore = 'hook:post-memory-store',
+  PreMemoryStore = 'PreMemoryStore',
+  PostMemoryStore = 'PostMemoryStore',
 
   // Learning
-  PatternDetected = 'hook:pattern-detected',
-  StrategyUpdated = 'hook:strategy-updated',
+  PatternDetected = 'PatternDetected',
+  StrategyUpdated = 'StrategyUpdated',
 
   // Plugin lifecycle
-  PluginLoaded = 'hook:plugin-loaded',
-  PluginUnloaded = 'hook:plugin-unloaded',
+  PluginLoaded = 'PluginLoaded',
+  PluginUnloaded = 'PluginUnloaded',
 }
 
 export enum HookPriority {

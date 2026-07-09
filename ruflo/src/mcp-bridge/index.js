@@ -48,7 +48,8 @@ const TOOL_GROUPS = {
     enabled: process.env.MCP_GROUP_MEMORY !== "false",
     description: "Vector memory, AgentDB, embeddings, semantic search (ruflo)",
     source: "ruflo",
-    prefixes: ["memory_", "agentdb_", "embeddings_"],
+    // agentdb_ is scoped to ruflo only — agentic-flow uses its own agentdb_ under a different backend
+    prefixes: ["memory_", "agentdb_", "embeddings_", "knowledge_"],
   },
 
   // --- Dev Tools (ruflo) ---
@@ -56,7 +57,8 @@ const TOOL_GROUPS = {
     enabled: process.env.MCP_GROUP_DEVTOOLS !== "false",
     description: "Hooks, code analysis, performance profiling, GitHub integration (ruflo)",
     source: "ruflo",
-    prefixes: ["hooks_", "analyze_", "performance_", "github_", "terminal_", "config_", "system_", "progress_"],
+    // hooks_ here refers to ruflo__hooks_* (dev lifecycle hooks), distinct from ruvector__hooks_* (intelligence)
+    prefixes: ["hooks_", "analyze_", "analysis_", "performance_", "github_", "terminal_", "config_", "system_", "progress_", "monitor_", "audit_"],
   },
 
   // --- Security & Safety (ruflo) ---
@@ -88,7 +90,15 @@ const TOOL_GROUPS = {
     enabled: process.env.MCP_GROUP_AGENTIC_FLOW === "true",
     description: "Execute 66+ specialized agents, batch code editing, AgentDB patterns (agentic-flow)",
     source: "agentic-flow",
+    // agentdb_ here is under the agentic-flow backend, not ruflo — no conflict since source differs
     prefixes: ["agentic_flow_", "agent_booster_", "agentdb_"],
+  },
+
+  // --- Ollama (local LLM) ---
+  ollama: {
+    enabled: process.env.MCP_GROUP_OLLAMA === "true",
+    description: "Local Ollama LLM — chat, generate, list/pull models (no API key needed)",
+    source: "ollama-mcp",
   },
 
   // --- Claude Code ---
@@ -118,10 +128,11 @@ const TOOL_GROUPS = {
 // =============================================================================
 
 class StdioMcpClient {
-  constructor(name, command, args = []) {
+  constructor(name, command, args = [], startDelay = 0) {
     this.name = name;
     this.command = command;
     this.args = args;
+    this.startDelay = startDelay;
     this.process = null;
     this.tools = [];
     this.ready = false;
@@ -152,7 +163,7 @@ class StdioMcpClient {
           this.ready = false;
         });
 
-        this._send("initialize", {
+        const doInit = () => this._send("initialize", {
           protocolVersion: "2024-11-05",
           capabilities: {},
           clientInfo: { name: "mcp-bridge", version: "2.0.0" },
@@ -178,6 +189,7 @@ class StdioMcpClient {
           resolve(false);
         });
 
+        setTimeout(doInit, this.startDelay);
         setTimeout(() => { if (!this.ready) resolve(false); }, 60000);
       } catch (err) {
         console.error(`[${this.name}] failed to start:`, err.message);
@@ -193,6 +205,7 @@ class StdioMcpClient {
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
+      if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) continue; // skip banner lines
       try {
         const msg = JSON.parse(trimmed);
         if (msg.id && this.pending.has(msg.id)) {
@@ -200,7 +213,7 @@ class StdioMcpClient {
           this.pending.delete(msg.id);
           resolve(msg.result || msg.error || {});
         }
-      } catch { /* skip non-JSON */ }
+      } catch { /* skip malformed JSON */ }
     }
   }
 
@@ -218,7 +231,7 @@ class StdioMcpClient {
           this.pending.delete(id);
           reject(new Error(`${this.name} timeout for ${method}`));
         }
-      }, 30000);
+      }, 60000);
     });
   }
 
@@ -251,9 +264,10 @@ class StdioMcpClient {
 // =============================================================================
 
 const BACKEND_DEFS = [
+  { name: "ollama-mcp", command: "node", args: ["/app/ollama-mcp.js"], groups: ["ollama"] },
   { name: "ruvector",       command: "npx", args: ["-y", "ruvector", "mcp", "start"],   groups: ["intelligence"] },
   { name: "ruflo",          command: "npx", args: ["-y", "ruflo", "mcp", "start"],      groups: ["agents", "memory", "devtools", "security", "browser", "neural"] },
-  { name: "agentic-flow",   command: "npx", args: ["-y", "agentic-flow@alpha", "mcp", "start"], groups: ["agentic-flow"] },
+  { name: "agentic-flow",   command: "node", args: ["/usr/local/lib/node_modules/agentic-flow/dist/mcp/standalone-stdio.js"], groups: ["agentic-flow"], startDelay: 3000 },
   { name: "claude",         command: "claude", args: ["mcp", "serve"],                  groups: ["claude-code"] },
   { name: "gemini-mcp",     command: "npx", args: ["-y", "gemini-mcp-server"],          groups: ["gemini"] },
   { name: "codex",          command: "npx", args: ["-y", "@openai/codex", "mcp", "serve"], groups: ["codex"] },
@@ -301,7 +315,7 @@ async function initBackends() {
 
   await Promise.allSettled(
     needed.map(async (b) => {
-      const client = new StdioMcpClient(b.name, b.command, b.args);
+      const client = new StdioMcpClient(b.name, b.command, b.args, b.startDelay || 0);
       const ok = await client.start();
       if (ok) {
         mcpBackends.set(b.name, client);
@@ -964,17 +978,30 @@ app.get("/mcp-servers", (_, res) => {
 // CHAT COMPLETIONS PROXY
 // =============================================================================
 
+const OLLAMA_BASE_URL = process.env.OLLAMA_URL || "http://ollama:11434";
+
 const PROVIDER_ROUTES = {
-  openai: { baseURL: "https://api.openai.com/v1/chat/completions", getKey: () => process.env.OPENAI_API_KEY },
-  gemini: { baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", getKey: () => process.env.GOOGLE_API_KEY },
-  openrouter: { baseURL: "https://openrouter.ai/api/v1/chat/completions", getKey: () => process.env.OPENROUTER_API_KEY },
+  openai:     { baseURL: "https://api.openai.com/v1/chat/completions",                              getKey: () => process.env.OPENAI_API_KEY },
+  gemini:     { baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", getKey: () => process.env.GOOGLE_API_KEY },
+  openrouter: { baseURL: "https://openrouter.ai/api/v1/chat/completions",                           getKey: () => process.env.OPENROUTER_API_KEY },
+  ollama:     { baseURL: `${OLLAMA_BASE_URL}/v1/chat/completions`,                                   getKey: () => "ollama" },
 };
 
 function resolveProvider(model) {
   if (typeof model === "string") {
-    if (model.startsWith("gemini-")) return "gemini";
+    if (model.startsWith("gemini-"))  return "gemini";
+    if (model.startsWith("ollama:") || model.startsWith("ollama/")) return "ollama";
+    // local Ollama model names (no slash, no known cloud prefix)
+    const cloudPrefixes = ["gpt-", "o1", "o3", "claude-", "gemini-", "text-", "dall-"];
+    if (!cloudPrefixes.some(p => model.startsWith(p)) && !model.includes("/")) {
+      // check if OLLAMA_DEFAULT is set and model matches
+      const ollamaDefault = process.env.OLLAMA_DEFAULT_MODEL || "";
+      if (ollamaDefault && model === ollamaDefault) return "ollama";
+    }
     if (model.includes("/")) return "openrouter";
   }
+  // If OLLAMA_DEFAULT_MODEL is set and no key for openai, prefer ollama
+  if (!process.env.OPENAI_API_KEY && process.env.OLLAMA_DEFAULT_MODEL) return "ollama";
   return "openai";
 }
 
@@ -1600,7 +1627,17 @@ app.post("/chat/completions", async (req, res) => {
 // =============================================================================
 
 const KNOWN_MODELS = [
-  "gemini-2.5-pro", "gemini-2.5-flash",
+  // Ollama local models
+  "llama3", "llama3:8b", "llama3:70b",
+  "mistral", "mistral:7b",
+  "codellama", "codellama:7b", "codellama:13b",
+  "phi3", "phi3:mini",
+  "gemma2", "gemma2:9b",
+  "qwen2", "qwen2:7b",
+  "deepseek-coder", "deepseek-coder:6.7b",
+  "nomic-embed-text",
+  // Cloud models
+  "gemini-2.5-pro-preview-05-06", "gemini-2.5-flash", "gemini-2.5-pro",
   "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini",
   "o3-mini", "o1-mini",
 ];

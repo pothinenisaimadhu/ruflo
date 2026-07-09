@@ -400,6 +400,9 @@ async function getCodeSearch(): Promise<SemanticCodeSearch> {
 }
 
 export const semanticCodeSearchPlugin = new PluginBuilder('semantic-code-search', '1.0.0')
+  .withId('ruvector-semantic-code-search')
+  .withName('RuVector Semantic Code Search')
+  .withCapabilities(['code-search', 'vector-search', 'indexing'])
   .withDescription('Semantic code search using @ruvector/wasm HNSW indexing (<1ms search)')
   .withAuthor('Claude Flow Team')
   .withTags(['search', 'code', 'semantic', 'ruvector', 'hnsw'])

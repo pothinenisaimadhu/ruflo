@@ -42,6 +42,7 @@
 		p?: number;
 		ondeleteConversation?: (id: string) => void;
 		oneditConversationTitle?: (payload: { id: string; title: string }) => void;
+		onopenWorkspace?: () => void;
 	}
 
 	let {
@@ -50,6 +51,7 @@
 		p = $bindable(0),
 		ondeleteConversation,
 		oneditConversationTitle,
+		onopenWorkspace,
 	}: Props = $props();
 
 	let hasMore = $state(true);
@@ -238,6 +240,17 @@
 			{/if}
 		</button>
 	{/if}
+
+	<button
+		onclick={() => onopenWorkspace?.()}
+		class="flex h-9 flex-none items-center gap-1.5 rounded-lg pl-2.5 pr-2 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
+		title="Browse and edit workspace files"
+	>
+		<svg class="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+		</svg>
+		Workspace
+	</button>
 
 	<span class="flex gap-1">
 		<a

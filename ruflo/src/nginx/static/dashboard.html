@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RuFlo Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1117; --card: #1a1d27; --border: #2a2d3e;
+    --accent: #6366f1; --green: #22c55e; --yellow: #eab308;
+    --red: #ef4444; --text: #e2e8f0; --muted: #64748b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; }
+  header { display: flex; align-items: center; gap: 12px; padding: 16px 24px; border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 18px; font-weight: 600; }
+  .badge { padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; }
+  .badge.ok { background: #14532d; color: var(--green); }
+  .badge.err { background: #450a0a; color: var(--red); }
+  #last-update { margin-left: auto; color: var(--muted); font-size: 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; padding: 24px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .card h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 8px; }
+  .stat { font-size: 32px; font-weight: 700; }
+  .stat.green { color: var(--green); }
+  .stat.yellow { color: var(--yellow); }
+  .stat.red { color: var(--red); }
+  .section { padding: 0 24px 24px; }
+  .section h2 { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; padding: 8px 12px; font-size: 11px; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--border); }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .dot.green { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot.red { background: var(--red); }
+  .dot.yellow { background: var(--yellow); }
+  #graph-canvas { width: 100%; height: 480px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; }
+  .models-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+  .model-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+  .model-card .name { font-weight: 600; font-size: 13px; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .model-card .provider { font-size: 11px; color: var(--muted); }
+  .ping { font-size: 11px; margin-top: 6px; }
+  .ping.ok { color: var(--green); }
+  .ping.err { color: var(--red); }
+  .ping.pending { color: var(--yellow); }
+</style>
+</head>
+<body>
+<header>
+  <svg width="28" height="28" viewBox="0 0 28 28" fill="none"><circle cx="14" cy="14" r="14" fill="#6366f1"/><path d="M8 14l4 4 8-8" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  <h1>RuFlo Dashboard</h1>
+  <span id="status-badge" class="badge ok">● LIVE</span>
+  <span id="last-update">–</span>
+</header>
+
+<div class="grid">
+  <div class="card"><h3>Total Tools</h3><div id="stat-tools" class="stat">–</div></div>
+  <div class="card"><h3>Active Backends</h3><div id="stat-backends" class="stat green">–</div></div>
+  <div class="card"><h3>Tool Groups</h3><div id="stat-groups" class="stat">–</div></div>
+  <div class="card"><h3>Models Available</h3><div id="stat-models" class="stat green">–</div></div>
+</div>
+
+<div class="section">
+  <h2>Agent Graph</h2>
+  <canvas id="graph-canvas"></canvas>
+</div>
+
+<div class="section">
+  <h2>MCP Backends</h2>
+  <div class="card" style="padding:0">
+    <table>
+      <thead><tr><th>Backend</th><th>Status</th><th>Tools</th></tr></thead>
+      <tbody id="backends-table"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="section">
+  <h2>Tool Groups</h2>
+  <div class="card" style="padding:0">
+    <table>
+      <thead><tr><th>Group</th><th>Status</th><th>Tools</th><th>Description</th></tr></thead>
+      <tbody id="groups-table"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="section">
+  <h2>Available Models</h2>
+  <div id="models-grid" class="models-grid"></div>
+</div>
+
+<script>
+const BRIDGE = '/mcp-bridge';
+
+async function fetchJSON(path) {
+  const r = await fetch(BRIDGE + path);
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}
+
+function dot(ok) {
+  return `<span class="dot ${ok ? 'green' : 'red'}"></span>`;
+}
+
+async function refresh() {
+  try {
+    const [health, groups, models] = await Promise.all([
+      fetchJSON('/health'),
+      fetchJSON('/groups'),
+      fetchJSON('/models'),
+    ]);
+
+    // Stats
+    document.getElementById('stat-tools').textContent = health.tools.total;
+    const KNOWN_BACKENDS = ['ruvector','ruflo','agentic-flow','gemini-mcp','ollama-mcp'];
+    const allBackends = { ...health.backends };
+    KNOWN_BACKENDS.forEach(b => { if (!(b in allBackends)) allBackends[b] = { ready: false, tools: 0 }; });
+    document.getElementById('stat-backends').textContent = Object.values(allBackends).filter(b => b.ready).length + '/' + KNOWN_BACKENDS.length;
+    document.getElementById('stat-groups').textContent = Object.values(health.groups).filter(g => g.enabled).length;
+    document.getElementById('stat-models').textContent = models.data.length;
+    document.getElementById('last-update').textContent = 'Updated ' + new Date().toLocaleTimeString();
+    document.getElementById('status-badge').className = 'badge ok';
+    document.getElementById('status-badge').textContent = '● LIVE';
+
+    // Backends table — show all known backends, mark missing ones as offline
+    const bt = document.getElementById('backends-table');
+    bt.innerHTML = Object.entries(allBackends).map(([name, b]) =>
+      `<tr><td>${dot(b.ready)}<strong>${name}</strong></td><td>${b.ready ? '<span style="color:var(--green)">Ready</span>' : '<span style="color:var(--red)">Offline / Not started</span>'}</td><td>${b.tools}</td></tr>`
+    ).join('');
+
+    // Groups table — use /groups endpoint (has description + tool count)
+    const gt = document.getElementById('groups-table');
+    gt.innerHTML = Object.entries(groups).map(([name, g]) =>
+      `<tr><td>${dot(g.enabled)}<strong>${name}</strong></td><td>${g.enabled ? '<span style="color:var(--green)">Active</span>' : '<span style="color:var(--muted)">Disabled</span>'}</td><td>${g.tools}</td><td style="color:var(--muted);font-size:12px">${g.description || ''}</td></tr>`
+    ).join('');
+
+    // Models grid
+    const mg = document.getElementById('models-grid');
+    mg.innerHTML = models.data.map(m => {
+      const provider = m.id.includes('/') ? 'OpenRouter' : m.id.startsWith('gemini') ? 'Google' : m.id.includes(':') ? 'Ollama' : 'OpenAI';
+      return `<div class="model-card"><div class="name" title="${m.id}">${m.id}</div><div class="provider">${provider}</div><div class="ping pending" id="ping-${btoa(m.id).replace(/[^a-z0-9]/gi,'_')}">● checking...</div></div>`;
+    }).join('');
+
+    // Draw agent graph
+    lastHealth = health;
+    lastGroups = groups;
+    drawGraph(health, groups);
+
+    // Ping models async
+    pingModels(models.data);
+
+  } catch (e) {
+    document.getElementById('status-badge').className = 'badge err';
+    document.getElementById('status-badge').textContent = '● OFFLINE';
+  }
+}
+
+async function pingModels(models) {
+  await Promise.allSettled(models.map(async m => {
+    const key = btoa(m.id).replace(/[^a-z0-9]/gi, '_');
+    const el = document.getElementById('ping-' + key);
+    if (!el) return;
+    try {
+      const start = Date.now();
+      const r = await fetch(BRIDGE + '/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: m.id, messages: [{ role: 'user', content: 'hi' }], max_tokens: 1, stream: false }),
+        signal: AbortSignal.timeout(8000),
+      });
+      const ms = Date.now() - start;
+      if (r.ok || r.status === 200) {
+        el.className = 'ping ok'; el.textContent = `● ${ms}ms`;
+      } else {
+        el.className = 'ping err'; el.textContent = `● ${r.status}`;
+      }
+    } catch {
+      el.className = 'ping err'; el.textContent = '● timeout';
+    }
+  }));
+}
+
+function drawGraph(health, groups) {
+  const canvas = document.getElementById('graph-canvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = canvas.offsetWidth * devicePixelRatio;
+  canvas.height = canvas.offsetHeight * devicePixelRatio;
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+  const W = canvas.offsetWidth, H = canvas.offsetHeight;
+  ctx.clearRect(0, 0, W, H);
+
+  const cx = W / 2, cy = H / 2;
+
+  // ── Group colour map ──────────────────────────────────────────────
+  const GROUP_COLORS = {
+    core: '#f59e0b',
+    intelligence: '#8b5cf6',
+    agents: '#22c55e',
+    memory: '#06b6d4',
+    devtools: '#3b82f6',
+    security: '#ef4444',
+    browser: '#f97316',
+    neural: '#ec4899',
+    'agentic-flow': '#a855f7',
+    'claude-code': '#64748b',
+    gemini: '#10b981',
+    codex: '#6366f1',
+    ollama: '#eab308',
+  };
+
+  // ── Inner ring: MCP backends (always show all known, offline if missing) ──
+  const KNOWN_BACKENDS_GRAPH = ['ruvector','ruflo','agentic-flow','gemini-mcp','ollama-mcp'];
+  const allBackendsGraph = { ...health.backends };
+  KNOWN_BACKENDS_GRAPH.forEach(b => { if (!(b in allBackendsGraph)) allBackendsGraph[b] = { ready: false, tools: 0 }; });
+  const backendEntries = Object.entries(allBackendsGraph);
+  const innerR = Math.min(W, H) * 0.22;
+  const backendNodes = backendEntries.map(([name, b], i) => {
+    const angle = (2 * Math.PI * i / backendEntries.length) - Math.PI / 2;
+    return {
+      id: name, label: name, type: 'backend',
+      x: cx + innerR * Math.cos(angle),
+      y: cy + innerR * Math.sin(angle),
+      color: b.ready ? '#22c55e' : '#ef4444',
+      r: 16, active: b.ready, tools: b.tools,
+    };
+  });
+
+  // ── Outer ring: ALL tool groups ───────────────────────────────────
+  const groupEntries = Object.entries(groups);
+  const outerR = Math.min(W, H) * 0.42;
+  const groupNodes = groupEntries.map(([name, g], i) => {
+    const angle = (2 * Math.PI * i / groupEntries.length) - Math.PI / 2;
+    const color = GROUP_COLORS[name] || '#6366f1';
+    return {
+      id: 'g_' + name, label: name, type: 'group',
+      x: cx + outerR * Math.cos(angle),
+      y: cy + outerR * Math.sin(angle),
+      color: g.enabled ? color : '#334155',
+      r: 13, active: g.enabled, tools: g.tools,
+      disabled: !g.enabled,
+    };
+  });
+
+  // ── Centre node ───────────────────────────────────────────────────
+  const centre = { id: 'bridge', label: 'MCP Bridge', x: cx, y: cy, color: '#6366f1', r: 30, active: true, type: 'centre' };
+
+  // ── Draw edges: centre → backends ────────────────────────────────
+  backendNodes.forEach(n => {
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(n.x, n.y);
+    ctx.strokeStyle = n.active ? '#6366f150' : '#ef444430';
+    ctx.lineWidth = n.active ? 1.5 : 1;
+    ctx.stroke();
+  });
+
+  // ── Draw edges: backends → their groups ──────────────────────────
+  const backendSourceMap = {
+    ruvector: 'intelligence',
+    ruflo: ['agents','memory','devtools','security','browser','neural'],
+    'agentic-flow': 'agentic-flow',
+    claude: 'claude-code',
+    'gemini-mcp': 'gemini',
+    'ollama-mcp': 'ollama',
+    // codex has no backend process in BACKEND_DEFS — no edge
+  };
+  backendNodes.forEach(bn => {
+    const mapped = backendSourceMap[bn.id];
+    const targets = Array.isArray(mapped) ? mapped : (mapped ? [mapped] : []);
+    targets.forEach(gname => {
+      const gn = groupNodes.find(g => g.id === 'g_' + gname);
+      if (!gn) return;
+      ctx.beginPath();
+      ctx.moveTo(bn.x, bn.y);
+      ctx.lineTo(gn.x, gn.y);
+      ctx.strokeStyle = gn.active ? gn.color + '40' : '#33415540';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    });
+  });
+
+  // ── Draw all nodes ────────────────────────────────────────────────
+  const allNodes = [centre, ...backendNodes, ...groupNodes];
+  allNodes.forEach(n => {
+    // Glow for active nodes
+    if (n.active && n.type !== 'centre') {
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.r + 4, 0, 2 * Math.PI);
+      ctx.fillStyle = n.color + '18';
+      ctx.fill();
+    }
+    // Circle fill
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, n.r, 0, 2 * Math.PI);
+    ctx.fillStyle = n.color + (n.disabled ? '18' : '28');
+    ctx.fill();
+    ctx.strokeStyle = n.color;
+    ctx.lineWidth = n.type === 'centre' ? 2.5 : 1.5;
+    ctx.stroke();
+
+    // Label below node
+    ctx.fillStyle = n.disabled ? '#475569' : '#e2e8f0';
+    ctx.font = `${n.type === 'centre' ? 11 : 9}px Inter, system-ui`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    const label = n.label.length > 12 ? n.label.slice(0, 11) + '…' : n.label;
+    ctx.fillText(label, n.x, n.y + n.r + 4);
+
+    // Tool count badge on group nodes
+    if (n.type === 'group' && n.tools > 0) {
+      ctx.fillStyle = n.color;
+      ctx.font = 'bold 8px Inter, system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(n.tools, n.x, n.y);
+    }
+
+    // Centre label
+    if (n.type === 'centre') {
+      ctx.fillStyle = '#e2e8f0';
+      ctx.font = 'bold 10px Inter, system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('MCP', n.x, n.y - 6);
+      ctx.fillText('Bridge', n.x, n.y + 6);
+    }
+  });
+
+  // ── Legend ────────────────────────────────────────────────────────
+  ctx.font = '9px Inter, system-ui';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  const legend = [
+    { color: '#22c55e', label: 'Backend ready' },
+    { color: '#ef4444', label: 'Backend offline' },
+    { color: '#6366f1', label: 'Group active' },
+    { color: '#334155', label: 'Group disabled' },
+  ];
+  legend.forEach((l, i) => {
+    ctx.beginPath();
+    ctx.arc(14, H - 60 + i * 14, 4, 0, 2 * Math.PI);
+    ctx.fillStyle = l.color;
+    ctx.fill();
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText(l.label, 24, H - 60 + i * 14);
+  });
+}
+
+refresh();
+setInterval(refresh, 15000);
+window.addEventListener('resize', () => drawGraph(
+  { backends: lastHealth?.backends || {}, tools: lastHealth?.tools || {} },
+  lastGroups || {}
+));
+let lastHealth = null, lastGroups = null;
+</script>
+</body>
+</html>

@@ -353,6 +353,9 @@ async function getSONALearning(): Promise<SONALearning> {
 }
 
 export const sonaLearningPlugin = new PluginBuilder('sona-learning', '1.0.0')
+  .withId('ruvector-sona-learning')
+  .withName('RuVector SONA Learning')
+  .withCapabilities(['learning', 'adaptation', 'optimization'])
   .withDescription('Self-Optimizing Neural Adaptation with @ruvector/learning-wasm (<100μs LoRA)')
   .withAuthor('Claude Flow Team')
   .withTags(['learning', 'neural', 'adaptation', 'lora', 'ruvector', 'sona', 'ewc'])

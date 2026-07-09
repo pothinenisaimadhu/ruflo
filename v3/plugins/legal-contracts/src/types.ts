@@ -723,7 +723,7 @@ export const PlaybookMatchInputSchema = z.object({
   playbook: z.string().max(1_000_000, 'Playbook size exceeds 1MB limit'),
   strictness: PlaybookStrictness.default('moderate'),
   suggestAlternatives: z.boolean().default(true),
-  prioritizeClauses: z.array(ClauseType).optional(),
+  prioritizeClauses: z.array(z.string()).optional(),
   matterContext: z.object({
     matterId: z.string(),
     clientId: z.string(),

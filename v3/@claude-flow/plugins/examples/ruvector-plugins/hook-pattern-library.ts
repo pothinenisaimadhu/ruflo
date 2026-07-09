@@ -340,6 +340,8 @@ async function getLibrary(): Promise<HookPatternLibrary> {
 }
 
 export const hookPatternLibraryPlugin = new PluginBuilder('hook-pattern-library', '1.0.0')
+  .withId('ruvector-hook-pattern-library')
+  .withCapabilities(['hooks', 'patterns', 'recommendations'])
   .withDescription('Learn optimal hook patterns for file types using @ruvector/wasm')
   .withAuthor('Claude Flow Team')
   .withTags(['hooks', 'patterns', 'learning', 'ruvector', 'optimization'])

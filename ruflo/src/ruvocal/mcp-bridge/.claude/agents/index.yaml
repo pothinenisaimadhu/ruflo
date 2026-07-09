@@ -1,0 +1,6 @@
+# RuVector Agent Configuration
+# Focus: quality
+
+agents:
+  - test-architect
+  - project-coordinator

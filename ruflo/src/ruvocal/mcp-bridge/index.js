@@ -1,6 +1,8 @@
 import express from "express";
 import { spawn } from "child_process";
 import { randomUUID } from "crypto";
+import { resolve as pathResolve, join as pathJoin, dirname } from "path";
+import { readdir, readFile, writeFile, mkdir, rm } from "fs/promises";
 
 // =============================================================================
 // CONFIGURATION
@@ -48,7 +50,8 @@ const TOOL_GROUPS = {
     enabled: process.env.MCP_GROUP_MEMORY !== "false",
     description: "Vector memory, AgentDB, embeddings, semantic search (ruflo)",
     source: "ruflo",
-    prefixes: ["memory_", "agentdb_", "embeddings_"],
+    // agentdb_ is scoped to ruflo only — agentic-flow uses its own agentdb_ under a different backend
+    prefixes: ["memory_", "agentdb_", "embeddings_", "knowledge_"],
   },
 
   // --- Dev Tools (ruflo) ---
@@ -56,7 +59,8 @@ const TOOL_GROUPS = {
     enabled: process.env.MCP_GROUP_DEVTOOLS !== "false",
     description: "Hooks, code analysis, performance profiling, GitHub integration (ruflo)",
     source: "ruflo",
-    prefixes: ["hooks_", "analyze_", "performance_", "github_", "terminal_", "config_", "system_", "progress_"],
+    // hooks_ here refers to ruflo__hooks_* (dev lifecycle hooks), distinct from ruvector__hooks_* (intelligence)
+    prefixes: ["hooks_", "analyze_", "analysis_", "performance_", "github_", "terminal_", "config_", "system_", "progress_", "monitor_", "audit_"],
   },
 
   // --- Security & Safety (ruflo) ---
@@ -88,6 +92,7 @@ const TOOL_GROUPS = {
     enabled: process.env.MCP_GROUP_AGENTIC_FLOW === "true",
     description: "Execute 66+ specialized agents, batch code editing, AgentDB patterns (agentic-flow)",
     source: "agentic-flow",
+    // agentdb_ here is under the agentic-flow backend, not ruflo — no conflict since source differs
     prefixes: ["agentic_flow_", "agent_booster_", "agentdb_"],
   },
 
@@ -118,10 +123,11 @@ const TOOL_GROUPS = {
 // =============================================================================
 
 class StdioMcpClient {
-  constructor(name, command, args = []) {
+  constructor(name, command, args = [], startDelay = 0) {
     this.name = name;
     this.command = command;
     this.args = args;
+    this.startDelay = startDelay;
     this.process = null;
     this.tools = [];
     this.ready = false;
@@ -135,6 +141,8 @@ class StdioMcpClient {
         this.process = spawn(this.command, this.args, {
           stdio: ["pipe", "pipe", "pipe"],
           env: { ...process.env },
+          shell: process.platform === "win32",
+          windowsHide: true,
         });
 
         this.process.stdout.on("data", (data) => this._onData(data.toString()));
@@ -152,7 +160,7 @@ class StdioMcpClient {
           this.ready = false;
         });
 
-        this._send("initialize", {
+        const doInit = () => this._send("initialize", {
           protocolVersion: "2024-11-05",
           capabilities: {},
           clientInfo: { name: "mcp-bridge", version: "2.0.0" },
@@ -178,7 +186,8 @@ class StdioMcpClient {
           resolve(false);
         });
 
-        setTimeout(() => { if (!this.ready) resolve(false); }, 60000);
+        setTimeout(doInit, this.startDelay);
+        setTimeout(() => { if (!this.ready) resolve(false); }, 300000);
       } catch (err) {
         console.error(`[${this.name}] failed to start:`, err.message);
         resolve(false);
@@ -193,6 +202,7 @@ class StdioMcpClient {
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
+      if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) continue;
       try {
         const msg = JSON.parse(trimmed);
         if (msg.id && this.pending.has(msg.id)) {
@@ -218,7 +228,7 @@ class StdioMcpClient {
           this.pending.delete(id);
           reject(new Error(`${this.name} timeout for ${method}`));
         }
-      }, 30000);
+      }, method === "initialize" ? 120000 : 90000);
     });
   }
 
@@ -250,13 +260,14 @@ class StdioMcpClient {
 // BACKEND REGISTRY
 // =============================================================================
 
+const IS_WIN = process.platform === "win32";
+
 const BACKEND_DEFS = [
-  { name: "ruvector",       command: "npx", args: ["-y", "ruvector", "mcp", "start"],   groups: ["intelligence"] },
-  { name: "ruflo",          command: "npx", args: ["-y", "ruflo", "mcp", "start"],      groups: ["agents", "memory", "devtools", "security", "browser", "neural"] },
-  { name: "agentic-flow",   command: "npx", args: ["-y", "agentic-flow@alpha", "mcp", "start"], groups: ["agentic-flow"] },
-  { name: "claude",         command: "claude", args: ["mcp", "serve"],                  groups: ["claude-code"] },
-  { name: "gemini-mcp",     command: "npx", args: ["-y", "gemini-mcp-server"],          groups: ["gemini"] },
-  { name: "codex",          command: "npx", args: ["-y", "@openai/codex", "mcp", "serve"], groups: ["codex"] },
+  { name: "ruvector",     command: "npx",    args: ["-y", "ruvector", "mcp", "start"],   groups: ["intelligence"] },
+  { name: "ruflo",        command: "npx",    args: ["-y", "ruflo", "mcp", "start"],      groups: ["agents", "memory", "devtools", "security", "browser", "neural"], startDelay: IS_WIN ? 5000 : 0 },
+  { name: "agentic-flow", command: "npx",  args: ["-y", "agentic-flow", "mcp", "start"], groups: ["agentic-flow"], startDelay: IS_WIN ? 10000 : 3000 },
+  { name: "claude",       command: "claude", args: ["mcp", "serve"],                     groups: ["claude-code"] },
+  { name: "ollama-mcp",   command: "node",   args: [new URL('./ollama-mcp.js', import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')], groups: ["ollama"] },
 ];
 
 const mcpBackends = new Map();
@@ -301,7 +312,7 @@ async function initBackends() {
 
   await Promise.allSettled(
     needed.map(async (b) => {
-      const client = new StdioMcpClient(b.name, b.command, b.args);
+      const client = new StdioMcpClient(b.name, b.command, b.args, b.startDelay || 0);
       const ok = await client.start();
       if (ok) {
         mcpBackends.set(b.name, client);
@@ -322,7 +333,42 @@ process.on("SIGINT", () => { for (const [, c] of mcpBackends) c.stop(); process.
 // BUILT-IN TOOLS (core group — always on)
 // =============================================================================
 
+const WORKSPACE_PATH = process.env.WORKSPACE_PATH || "/workspace";
+
 const BUILTIN_TOOLS = [
+  {
+    name: "write_file",
+    description: "Write content to a file on the host machine workspace. Use this to create or overwrite files. Path is relative to the workspace root (e.g. 'auth-service/src/index.js').",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "File path relative to workspace root" },
+        content: { type: "string", description: "File content to write" },
+      },
+      required: ["path", "content"],
+    },
+  },
+  {
+    name: "read_file",
+    description: "Read a file from the host machine workspace.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "File path relative to workspace root" },
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "list_files",
+    description: "List files and directories in the workspace.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Directory path relative to workspace root (default: root)", default: "." },
+      },
+    },
+  },
   {
     name: "search",
     description: "Search your knowledge base for relevant information.",
@@ -640,78 +686,107 @@ Requires: OPENAI_API_KEY environment variable (already set for OpenAI models).
 }
 
 // =============================================================================
-// GEMINI GROUNDED SEARCH — Uses Gemini's built-in Google Search when no
-// dedicated search Cloud Function is configured
+// FREE SEARCH — DuckDuckGo HTML scrape + Wikipedia API (no API key needed)
 // =============================================================================
 
-async function geminiGroundedSearch(query, mode = "search") {
-  const apiKey = process.env.GOOGLE_API_KEY;
-  if (!apiKey) return { error: "No GOOGLE_API_KEY configured for search" };
+// Simple HTML tag stripper
+function stripHtml(html) {
+  return html.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+}
 
-  const model = "gemini-2.5-flash";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
-  const systemInstructions = {
-    search: `You are a helpful search assistant. Answer the query using Google Search results. Include key facts, sources, and relevant details. Be concise but thorough.`,
-    research: `You are a research analyst. Provide a comprehensive research report on the topic using Google Search results. Include: key findings, analysis, multiple perspectives, and source citations. Be thorough.`,
-    compare: `You are a comparison analyst. Compare the items using Google Search results. Create a structured comparison with pros/cons, key differences, and a recommendation.`,
-    fact_check: `You are a fact-checker. Verify the claim using Google Search results. Provide a verdict (TRUE/FALSE/PARTIALLY TRUE/UNVERIFIABLE), evidence, and sources.`,
-  };
-
-  const prompt = mode === "fact_check"
-    ? `Fact-check this claim: "${query}"`
-    : mode === "compare"
-      ? `Compare these items: ${query}`
-      : mode === "research"
-        ? `Research this topic thoroughly: ${query}`
-        : query;
-
+async function duckduckgoSearch(query) {
+  // DuckDuckGo HTML endpoint — no API key, no rate limit headers needed
+  const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
   try {
     const resp = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemInstructions[mode] || systemInstructions.search }] },
-        contents: [{ parts: [{ text: prompt }] }],
-        tools: [{ google_search: {} }],
-        generationConfig: { temperature: 0.2 },
-      }),
-      signal: AbortSignal.timeout(30000),
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; RuFlo/3.5; +https://ruv.io)" },
+      signal: AbortSignal.timeout(15000),
     });
+    if (!resp.ok) return { error: `DuckDuckGo error: ${resp.status}` };
+    const html = await resp.text();
 
-    if (!resp.ok) {
-      const errText = await resp.text();
-      console.error(`[gemini-search] API error ${resp.status}:`, errText.substring(0, 200));
-      return { error: `Search API error: ${resp.status}` };
+    // Extract result snippets from DDG HTML
+    const results = [];
+    const resultRegex = /<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+    const titleRegex = /<a class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+    const titles = [], urls = [];
+    let m;
+    while ((m = titleRegex.exec(html)) !== null && titles.length < 8) {
+      const href = m[1];
+      // DDG wraps URLs — extract the actual URL from uddg= param
+      const uddg = href.match(/uddg=([^&]+)/);
+      urls.push(uddg ? decodeURIComponent(uddg[1]) : href);
+      titles.push(stripHtml(m[2]));
+    }
+    let i = 0;
+    while ((m = resultRegex.exec(html)) !== null && i < 8) {
+      results.push({
+        title: titles[i] || "",
+        snippet: stripHtml(m[1]),
+        url: urls[i] || "",
+      });
+      i++;
     }
 
-    const data = await resp.json();
-    const candidate = data.candidates?.[0];
-    const answer = candidate?.content?.parts?.map(p => p.text).filter(Boolean).join("\n") || "";
+    if (results.length === 0) return { error: "No results found", answer: "", sources: [] };
 
-    // Extract grounding metadata (sources)
-    const grounding = candidate?.groundingMetadata || {};
-    const chunks = grounding.groundingChunks || [];
-    const sources = chunks
-      .filter(c => c.web)
-      .map(c => ({ title: c.web.title || "", url: c.web.uri || "" }))
-      .filter(s => s.url);
-
-    // Extract search queries used
-    const searchQueries = (grounding.webSearchQueries || []);
-
-    return {
-      success: true,
-      answer,
-      sources: sources.slice(0, 8),
-      searchQueries,
-      groundingMetadata: { sources, searchQueries },
-      mode,
-    };
+    const answer = results.map(r => `**${r.title}**\n${r.snippet}`).join("\n\n");
+    const sources = results.filter(r => r.url).map(r => ({ title: r.title, url: r.url }));
+    return { success: true, answer, sources, searchQueries: [query] };
   } catch (err) {
     if (err.name === "AbortError" || err.name === "TimeoutError") return { error: "Search timed out" };
     return { error: err.message };
   }
+}
+
+async function wikipediaSearch(query) {
+  // Wikipedia OpenSearch API — completely free, no key
+  const searchUrl = `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=3&format=json&origin=*`;
+  try {
+    const resp = await fetch(searchUrl, { signal: AbortSignal.timeout(10000) });
+    if (!resp.ok) return { error: `Wikipedia error: ${resp.status}` };
+    const [, titles, , urls] = await resp.json();
+    if (!titles || titles.length === 0) return { error: "No Wikipedia results", answer: "", sources: [] };
+
+    // Fetch summary for the top result
+    const summaryUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(titles[0])}`;
+    const sumResp = await fetch(summaryUrl, { signal: AbortSignal.timeout(10000) });
+    let summary = "";
+    if (sumResp.ok) {
+      const data = await sumResp.json();
+      summary = data.extract || "";
+    }
+
+    const answer = summary || titles.map((t, i) => `${t}: ${urls[i]}`).join("\n");
+    const sources = titles.map((t, i) => ({ title: t, url: urls[i] }));
+    return { success: true, answer, sources, searchQueries: [query] };
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
+async function freeSearch(query, mode = "search") {
+  // Try DuckDuckGo first, fall back to Wikipedia
+  const ddg = await duckduckgoSearch(query);
+  if (ddg.success && ddg.answer) {
+    // For research/news queries also try Wikipedia for depth
+    if (mode === "research") {
+      const wiki = await wikipediaSearch(query);
+      if (wiki.success && wiki.answer) {
+        return {
+          success: true,
+          answer: ddg.answer + "\n\n---\n\n" + wiki.answer,
+          sources: [...(ddg.sources || []), ...(wiki.sources || [])],
+          searchQueries: [query],
+        };
+      }
+    }
+    return ddg;
+  }
+  // DDG failed — try Wikipedia
+  const wiki = await wikipediaSearch(query);
+  if (wiki.success) return wiki;
+  return { error: "All search providers failed. Please try again later.", answer: "", sources: [] };
 }
 
 // =============================================================================
@@ -819,83 +894,46 @@ async function executeGoapSearch(query, args) {
 }
 
 // =============================================================================
-// GOAP SEARCH PIPELINE — Gemini fallback (no Cloud Function needed)
+// GOAP SEARCH PIPELINE — free fallback (DuckDuckGo + Wikipedia)
 // =============================================================================
 
-async function executeGoapSearchGemini(query, args) {
+async function executeGoapSearchFree(query, args) {
   const startTime = Date.now();
 
-  // Step 1: Decompose into sub-queries
-  const decompose = await geminiGroundedSearch(
-    `Break this question into 3-4 distinct search queries that would help answer it comprehensively. Return ONLY the queries, one per line:\n\n${query}`,
-    "search"
-  );
+  // Step 1: Run 2-3 parallel searches with varied queries
+  const subQueries = [
+    query,
+    `${query} latest news`,
+    `${query} overview`,
+  ];
 
-  let searchQueries = [query];
-  if (decompose?.answer) {
-    const lines = decompose.answer.split("\n")
-      .map(l => l.replace(/^[\d\-\*\.\)]+\s*/, "").trim())
-      .filter(l => l.length > 5 && l.length < 200);
-    if (lines.length >= 2) searchQueries = lines.slice(0, 4);
-  }
-
-  // Step 2: Parallel searches
-  const searchResults = await Promise.all(
-    searchQueries.map(q => geminiGroundedSearch(q, "search"))
-  );
+  const searchResults = await Promise.all(subQueries.map(q => freeSearch(q, "search")));
 
   const allSources = [], allAnswers = [];
+  const seenUrls = new Set();
   for (let i = 0; i < searchResults.length; i++) {
     const r = searchResults[i];
     if (r && !r.error && r.answer) {
-      allAnswers.push({ query: searchQueries[i], answer: r.answer });
-      if (r.sources) allSources.push(...r.sources);
+      allAnswers.push({ query: subQueries[i], answer: r.answer });
+      for (const s of (r.sources || [])) {
+        if (s.url && !seenUrls.has(s.url)) { seenUrls.add(s.url); allSources.push(s); }
+      }
     }
   }
 
-  // Dedupe sources
-  const seenUrls = new Set();
-  const uniqueSources = allSources.filter(s => {
-    if (seenUrls.has(s.url)) return false;
-    seenUrls.add(s.url);
-    return true;
-  });
-
-  // Step 3: Synthesize
-  const synthesisInput = allAnswers.map(a => `## ${a.query}\n${a.answer}`).join("\n\n");
-  const synthesis = await geminiGroundedSearch(
-    `Synthesize these findings into a comprehensive answer to: "${query}"\n\nFindings:\n${synthesisInput}`,
-    "research"
-  );
-
-  const finalAnswer = synthesis?.answer || synthesisInput;
-  if (synthesis?.sources) {
-    for (const s of synthesis.sources) {
-      if (!seenUrls.has(s.url)) { seenUrls.add(s.url); uniqueSources.push(s); }
-    }
-  }
-
-  // Step 4: Verify if requested
-  let verification = { verified: true, confidence: "high" };
-  if (args.verify !== false && finalAnswer.length > 100) {
-    const vr = await geminiGroundedSearch(finalAnswer.substring(0, 500), "fact_check");
-    if (vr && !vr.error) {
-      verification = { verified: true, confidence: "medium", details: vr.answer };
-    }
-  }
+  const finalAnswer = allAnswers.map(a => `## ${a.query}\n${a.answer}`).join("\n\n") || "No results found.";
 
   return {
     success: true,
     answer: finalAnswer,
-    pipeline: "goap-gemini",
+    pipeline: "goap-free",
     steps: {
-      queries_composed: searchQueries.length,
+      queries_composed: subQueries.length,
       searches_executed: searchResults.filter(r => !r?.error).length,
-      sources_found: uniqueSources.length,
-      verification,
+      sources_found: allSources.length,
     },
-    sources: uniqueSources.slice(0, 10),
-    searchQueries,
+    sources: allSources.slice(0, 10),
+    searchQueries: subQueries,
     duration_ms: Date.now() - startTime,
   };
 }
@@ -910,16 +948,14 @@ async function executeTool(name, args) {
       if (CLOUD_FUNCTIONS.search) {
         return callCloudFunction(CLOUD_FUNCTIONS.search, { query: args.query, limit: args.limit || 5 });
       }
-      // Fallback: use Gemini grounded search
-      return geminiGroundedSearch(args.query, "search");
+      return freeSearch(args.query, "search");
     }
 
     case "web_research": {
       const action = args.action || "search";
       if (action === "goap") {
-        // GOAP needs research endpoint — fall back to multi-search via Gemini
         if (CLOUD_FUNCTIONS.research) return executeGoapSearch(args.query, args);
-        return executeGoapSearchGemini(args.query, args);
+        return executeGoapSearchFree(args.query, args);
       }
       if (CLOUD_FUNCTIONS.research) {
         const payload = { action };
@@ -929,14 +965,41 @@ async function executeTool(name, args) {
         else if (action === "fact_check") payload.claim = args.claim || args.query;
         return callCloudFunction(CLOUD_FUNCTIONS.research, payload, 60000);
       }
-      // Fallback: Gemini grounded search
-      const mode = action === "fact_check" ? "fact_check" : action === "compare" ? "compare" : action === "research" ? "research" : "search";
+      // Fallback: free search
       const query = action === "compare" ? (args.items || []).join(" vs ") : (args.claim || args.query);
-      return geminiGroundedSearch(query, mode);
+      const mode = action === "research" ? "research" : "search";
+      return freeSearch(query, mode);
     }
 
     case "guidance":
       return getGuidance(args.topic || "overview", args.tool_name);
+
+    case "write_file": {
+      const { path: filePath, content } = args;
+      if (!filePath) return { error: "path is required" };
+      const abs = pathResolve(WORKSPACE_PATH, filePath);
+      if (!abs.startsWith(pathResolve(WORKSPACE_PATH))) return { error: "Path traversal not allowed" };
+      await mkdir(dirname(abs), { recursive: true });
+      await writeFile(abs, content, "utf8");
+      return { success: true, path: filePath, bytes: Buffer.byteLength(content, "utf8") };
+    }
+
+    case "read_file": {
+      const { path: filePath } = args;
+      const abs = pathResolve(WORKSPACE_PATH, filePath);
+      if (!abs.startsWith(pathResolve(WORKSPACE_PATH))) return { error: "Path traversal not allowed" };
+      const content = await readFile(abs, "utf8");
+      return { success: true, path: filePath, content };
+    }
+
+    case "list_files": {
+      const { path: dirPath = "." } = args;
+      const abs = pathResolve(WORKSPACE_PATH, dirPath);
+      if (!abs.startsWith(pathResolve(WORKSPACE_PATH))) return { error: "Path traversal not allowed" };
+      const entries = await readdir(abs, { withFileTypes: true });
+      const items = entries.map(e => ({ name: e.name, type: e.isDirectory() ? "dir" : "file", path: pathJoin(dirPath, e.name) }));
+      return { success: true, path: dirPath, entries: items };
+    }
 
     default: {
       // Route to external MCP backend
@@ -1127,17 +1190,102 @@ app.get("/mcp-servers", (_, res) => {
 // CHAT COMPLETIONS PROXY
 // =============================================================================
 
+const OLLAMA_URL = process.env.OLLAMA_URL || "http://ollama:11434";
+const OLLAMA_DEFAULT_MODEL = process.env.OLLAMA_DEFAULT_MODEL || "llama3.2";
+
 const PROVIDER_ROUTES = {
-  openai: { baseURL: "https://api.openai.com/v1/chat/completions", getKey: () => process.env.OPENAI_API_KEY },
-  gemini: { baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", getKey: () => process.env.GOOGLE_API_KEY },
-  openrouter: { baseURL: "https://openrouter.ai/api/v1/chat/completions", getKey: () => process.env.OPENROUTER_API_KEY },
+  openai:     { baseURL: "https://api.openai.com/v1/chat/completions",                              getKey: () => process.env.OPENAI_API_KEY },
+  gemini:     { baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", getKey: () => process.env.GOOGLE_API_KEY },
+  openrouter: { baseURL: "https://openrouter.ai/api/v1/chat/completions",                           getKey: () => process.env.OPENROUTER_API_KEY },
+  ollama:     { baseURL: `${OLLAMA_URL}/v1/chat/completions`,                                        getKey: () => "ollama" },
 };
 
-function resolveProvider(model) {
-  if (typeof model === "string") {
-    if (model.startsWith("gemini-")) return "gemini";
-    if (model.includes("/")) return "openrouter";
+// Ollama native proxy — avoids /v1 auth issues by using /api/chat directly
+async function ollamaChat(body, res) {
+  const model = body.model || OLLAMA_DEFAULT_MODEL;
+  const stream = body.stream || false;
+  const payload = { model, messages: body.messages, stream };
+  if (body.temperature !== undefined) payload.options = { temperature: body.temperature };
+
+  let upstream;
+  try {
+    upstream = await fetch(`${OLLAMA_URL}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    return res.status(502).json({ error: { message: `Ollama unreachable: ${err.message}` } });
   }
+
+  if (!upstream.ok) {
+    const txt = await upstream.text();
+    return res.status(upstream.status).json({ error: { message: `Ollama error: ${txt}`, type: "upstream_error", code: upstream.status } });
+  }
+
+  if (stream) {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    const reader = upstream.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const d = JSON.parse(line);
+            const chunk = d.message?.content || "";
+            if (chunk) res.write(`data: ${JSON.stringify({ id:"chatcmpl-ollama", object:"chat.completion.chunk", model, choices:[{ delta:{ content:chunk }, index:0, finish_reason: d.done ? "stop" : null }] })}\n\n`);
+            if (d.done) res.write("data: [DONE]\n\n");
+          } catch {}
+        }
+      }
+    } catch {}
+    return res.end();
+  }
+
+  const data = await upstream.json();
+  return res.json({
+    id: "chatcmpl-ollama", object: "chat.completion", model,
+    choices: [{ message: { role: "assistant", content: data.message?.content || "" }, index: 0, finish_reason: "stop" }],
+    usage: { prompt_tokens: data.prompt_eval_count || 0, completion_tokens: data.eval_count || 0, total_tokens: (data.prompt_eval_count || 0) + (data.eval_count || 0) },
+  });
+}
+
+// Cloud model names served by Ollama (no API key needed)
+const OLLAMA_CLOUD_MODELS = new Set([
+  "deepseek-v4-flash:cloud","deepseek-v4-flash",
+  "kimi-k2.6","kimi-k2.5","kimi-k2-thinking","kimi-k2",
+  "glm-5.1","glm-5","glm-4.7","glm-4.6",
+  "qwen3-coder","qwen3-coder-next","qwen3.5","qwen3-vl","qwen3-next",
+  "minimax-m2.7","minimax-m2.5","minimax-m2.1","minimax-m2",
+  "nemotron-3-super","nemotron-3-nano",
+  "devstral-2","devstral-small-2",
+  "ministral-3","mistral-large-3",
+  "gemma4","gemma3",
+  "gemini-3-flash-preview",
+  "gpt-oss","rnj-1","cogito-2.1",
+  "deepseek-v3.2","deepseek-v3.1",
+  "llama3","llama3.2","llama3.2:3b","llama3.1","llama3:8b","llama3:70b",
+  "mistral","codellama","phi3","phi4","gemma2","qwen2",
+]);
+
+function resolveProvider(model) {
+  if (typeof model !== "string") return "openai";
+  // Ollama local/cloud models
+  const base = model.split(":")[0];
+  if (OLLAMA_CLOUD_MODELS.has(model) || OLLAMA_CLOUD_MODELS.has(base)) return "ollama";
+  // OpenRouter — models with a slash (org/model) including :free variants
+  if (model.includes("/")) return "openrouter";
+  // Gemini
+  if (model.startsWith("gemini-")) return "gemini";
+  // Default to OpenAI
   return "openai";
 }
 
@@ -1163,12 +1311,21 @@ function buildSystemPrompt() {
 4. NEVER say "I can't search the web" — you CAN via web_research
 5. Call tools FIRST, present results conversationally AFTER
 6. When multiple tools could help, call them ALL in parallel
+7. **SEARCH FAILURE RULE**: If web_research returns an error, try ONCE with a different query. If it fails again, answer from your own knowledge and tell the user search is temporarily unavailable. Do NOT retry more than twice.
 
 # Tool Groups
 
 Tools prefixed with backend name (e.g., \`ruflo__agent_spawn\`). Always use the full prefixed name.
 
 ## Group 1: Core Tools (always on)
+
+- **write_file** — Write a file to the host machine workspace. ALWAYS use this to create or save files — never use terminal for file creation.
+  \`{"path": "my-service/src/index.js", "content": "...full file content..."}\`
+  Paths are relative to workspace root. Parent directories are created automatically.
+
+- **read_file** — Read a file from the workspace. \`{"path": "my-service/package.json"}\`
+
+- **list_files** — List files in a workspace directory. \`{"path": "my-service/src"}\`
 
 - **search** — Search your knowledge base (documents, workflows, how-tos).
   Use for: internal knowledge, company docs, past conversations.
@@ -1377,10 +1534,23 @@ Performance, system health, GitHub integration, code analysis, terminal. ${TOOL_
 4. **"Is it true that..."** → \`web_research(action='fact_check', query='...')\`
 5. **Complex research** → \`web_research(action='goap', query='...')\` — auto multi-step pipeline
 6. **Internal docs/procedures** → \`search(query='...')\` first, then web_research if not found
-7. **Code task** → \`ruvector__hooks_route\` + \`ruflo__agent_spawn\`
+7. **Code task** → \`ruvector__hooks_route\` + \`ruflo__agent_spawn\` + \`agentic-flow__agentic_flow_agent\` to generate real working code. NEVER describe code or give a plan — always call this tool to produce complete, runnable files.
+   - Example: \`{"agent": "coder", "task": "write the full implementation of X with all files", "provider": "openrouter", "model": "openai/gpt-oss-20b:free"}\`
+   - For large projects call multiple agents in PARALLEL: architect for structure, coder for each component, security for hardening
+   - Each agent call MUST produce complete file contents, not snippets or placeholders
 8. **Remember something** → \`ruflo__memory_store\` / \`ruflo__memory_search\`
 9. **"What can you do?"** → \`guidance(topic='overview')\`
 10. **Unknown** → \`guidance(topic='overview')\`
+
+## Code Generation Rules (CRITICAL)
+- When asked to "build", "create", "write", "implement", or "generate" anything → call \`agentic-flow__agentic_flow_agent\` to generate the code, then IMMEDIATELY call \`ruflo__terminal_execute\` to write each file to disk
+- NEVER respond with a plan, roadmap, or bullet list when code is requested — produce the actual code and write it
+- For a full app: call architect agent first, then call coder agents in parallel for each component, then write each file
+- Always write complete file contents with proper imports, not snippets
+- **WRITING FILES**: Use \`ruflo__terminal_execute\` with a heredoc to write files: \`{"command": "cat > /tmp/filename.py << 'EOF'\\n<code>\\nEOF"}\`
+- **RUNNING CODE**: After writing, verify with \`ruflo__terminal_execute\`: \`{"command": "python3 /tmp/filename.py"}\`
+- **RUNNING TESTS**: \`{"command": "cd /tmp && python3 -m pytest filename.py -v"}\` or \`{"command": "python3 /tmp/filename.py"}\`
+- After generating code, store key patterns with \`ruflo__memory_store\`
 
 IMPORTANT: For questions 1-5, ALWAYS call web_research. Never say "I don't have access to search" — you DO.
 
@@ -1704,34 +1874,30 @@ app.get('/autopilot/detail/:token', (req, res) => {
 app.post("/chat/completions", async (req, res) => {
   const model = req.body?.model;
   const providerName = resolveProvider(model);
-  const provider = PROVIDER_ROUTES[providerName];
-  const apiKey = provider.getKey();
 
-  if (!apiKey) return res.status(401).json({ error: { message: `No API key for provider: ${providerName}` } });
-
-  // Inject comprehensive system prompt as the first message
+  // Inject system prompt
   const body = { ...req.body };
   if (body.messages && Array.isArray(body.messages)) {
     let systemPrompt = buildSystemPrompt();
-    // Add autopilot instructions if autopilot mode is active
     const isAutopilot = req.headers['x-autopilot'] === 'true';
-    if (isAutopilot) {
-      systemPrompt = AUTOPILOT_SYSTEM_PROMPT + '\n\n' + systemPrompt;
-    }
-    // Prepend our system prompt before any existing messages
+    if (isAutopilot) systemPrompt = AUTOPILOT_SYSTEM_PROMPT + '\n\n' + systemPrompt;
     const hasSystemMsg = body.messages[0]?.role === "system";
     if (hasSystemMsg) {
-      // Merge with existing system message
-      body.messages = [
-        { role: "system", content: systemPrompt + "\n\n" + body.messages[0].content },
-        ...body.messages.slice(1),
-      ];
+      body.messages = [{ role: "system", content: systemPrompt + "\n\n" + body.messages[0].content }, ...body.messages.slice(1)];
     } else {
       body.messages = [{ role: "system", content: systemPrompt }, ...body.messages];
     }
   }
 
-  // Route to autopilot handler if x-autopilot header is set
+  // Route Ollama models to native /api/chat (avoids auth issues with /v1)
+  if (providerName === "ollama") {
+    return ollamaChat(body, res);
+  }
+
+  const provider = PROVIDER_ROUTES[providerName];
+  const apiKey = provider.getKey();
+  if (!apiKey) return res.status(401).json({ error: { message: `No API key for provider: ${providerName}` } });
+
   if (req.headers['x-autopilot'] === 'true') {
     return handleAutopilot(req, res, provider, body);
   }
@@ -1791,9 +1957,25 @@ app.post("/chat/completions", async (req, res) => {
 // =============================================================================
 
 const KNOWN_MODELS = [
-  "gemini-2.5-pro", "gemini-2.5-flash",
-  "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini",
-  "o3-mini", "o1-mini",
+  // OpenRouter free models — confirmed working (non-Venice providers)
+  "openai/gpt-oss-120b:free",
+  "openai/gpt-oss-20b:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
+  "nvidia/nemotron-3-nano-30b-a3b:free",
+  // OpenRouter free models — Venice-hosted (may rate-limit)
+  "meta-llama/llama-3.3-70b-instruct:free",
+  "qwen/qwen3-coder:free",
+  "google/gemma-4-31b-it:free",
+  "minimax/minimax-m2.5:free",
+  "z-ai/glm-4.5-air:free",
+  "qwen/qwen3-next-80b-a3b-instruct:free",
+  "meta-llama/llama-3.2-3b-instruct:free",
+  // Gemini (free tier)
+  "gemini-2.5-flash",
+  // OpenAI
+  "gpt-4o-mini", "gpt-4o",
+  // Ollama local
+  "llama3.2",
 ];
 
 app.get("/models", (_, res) => {
@@ -1820,6 +2002,99 @@ app.get("/health", (_, res) => {
     tools: { builtin: BUILTIN_TOOLS.length, external: activeTools.length, total: BUILTIN_TOOLS.length + activeTools.length },
     groups, backends,
   });
+});
+
+// =============================================================================
+// WORKSPACE HTTP API — browse and edit files on the host-mounted /workspace
+// =============================================================================
+
+async function safeWorkspacePath(rel) {
+  const abs = pathResolve(WORKSPACE_PATH, rel || ".");
+  if (!abs.startsWith(pathResolve(WORKSPACE_PATH))) throw new Error("Path traversal not allowed");
+  return abs;
+}
+
+async function buildTree(abs, rel = ".", depth = 0) {
+  if (depth > 6) return [];
+  const entries = await readdir(abs, { withFileTypes: true });
+  const items = [];
+  for (const e of entries) {
+    if (e.name.startsWith(".")) continue; // skip hidden
+    const childRel = rel === "." ? e.name : `${rel}/${e.name}`;
+    const childAbs = pathJoin(abs, e.name);
+    if (e.isDirectory()) {
+      const children = await buildTree(childAbs, childRel, depth + 1);
+      items.push({ name: e.name, path: childRel, type: "dir", children });
+    } else {
+      items.push({ name: e.name, path: childRel, type: "file" });
+    }
+  }
+  return items.sort((a, b) => {
+    if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+// GET /workspace/tree — full directory tree
+app.get("/workspace/tree", async (req, res) => {
+  try {
+    const abs = await safeWorkspacePath(".");
+    const tree = await buildTree(abs);
+    res.json({ success: true, tree });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// GET /workspace/file?path=... — read file content
+app.get("/workspace/file", async (req, res) => {
+  try {
+    const abs = await safeWorkspacePath(req.query.path || "");
+    const content = await readFile(abs, "utf8");
+    res.json({ success: true, path: req.query.path, content });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// POST /workspace/file — write file content
+app.post("/workspace/file", async (req, res) => {
+  try {
+    const { path: filePath, content } = req.body;
+    if (!filePath) return res.status(400).json({ error: "path required" });
+    const abs = await safeWorkspacePath(filePath);
+    await mkdir(dirname(abs), { recursive: true });
+    await writeFile(abs, content ?? "", "utf8");
+    res.json({ success: true, path: filePath, bytes: Buffer.byteLength(content ?? "", "utf8") });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// DELETE /workspace/file — delete a file or directory (recursive)
+app.delete("/workspace/file", async (req, res) => {
+  try {
+    const filePath = req.query.path || req.body?.path;
+    if (!filePath) return res.status(400).json({ error: "path required" });
+    const abs = await safeWorkspacePath(filePath);
+    await rm(abs, { recursive: true, force: true });
+    res.json({ success: true, path: filePath });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// POST /workspace/mkdir — create directory
+app.post("/workspace/mkdir", async (req, res) => {
+  try {
+    const { path: dirPath } = req.body;
+    if (!dirPath) return res.status(400).json({ error: "path required" });
+    const abs = await safeWorkspacePath(dirPath);
+    await mkdir(abs, { recursive: true });
+    res.json({ success: true, path: dirPath });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // GET /groups — list tool groups and their status

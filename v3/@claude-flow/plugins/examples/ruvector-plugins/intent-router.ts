@@ -283,6 +283,9 @@ async function getRouter(): Promise<IntentRouter> {
 }
 
 export const intentRouterPlugin = new PluginBuilder('intent-router', '1.0.0')
+  .withId('ruvector-intent-router')
+  .withName('RuVector Intent Router')
+  .withCapabilities(['routing', 'intent-detection', 'vector-search'])
   .withDescription('Smart intent → handler routing using @ruvector/wasm HNSW (<1ms)')
   .withAuthor('Claude Flow Team')
   .withTags(['routing', 'intent', 'semantic', 'ruvector', 'hnsw'])

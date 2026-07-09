@@ -95,49 +95,49 @@ const FILE_TYPE_DIRECTORIES: Array<{
   /** Whether to block root writes */
   blockRoot: boolean;
 }> = [
-  // Test files (MUST come before source files - more specific patterns first)
-  { pattern: /\.test\.(ts|tsx|js|jsx)$/, directories: ['tests/', '__tests__/', 'test/'], type: 'test file', blockRoot: true },
-  { pattern: /\.spec\.(ts|tsx|js|jsx)$/, directories: ['tests/', '__tests__/', 'test/', 'spec/'], type: 'spec file', blockRoot: true },
-  { pattern: /_test\.go$/, directories: ['tests/', 'test/'], type: 'Go test file', blockRoot: true },
-  { pattern: /test_.*\.py$/, directories: ['tests/', 'test/'], type: 'Python test file', blockRoot: true },
-  { pattern: /.*_test\.py$/, directories: ['tests/', 'test/'], type: 'Python test file', blockRoot: true },
+    // Test files (MUST come before source files - more specific patterns first)
+    { pattern: /\.test\.(ts|tsx|js|jsx)$/, directories: ['tests/', '__tests__/', 'test/'], type: 'test file', blockRoot: true },
+    { pattern: /\.spec\.(ts|tsx|js|jsx)$/, directories: ['tests/', '__tests__/', 'test/', 'spec/'], type: 'spec file', blockRoot: true },
+    { pattern: /_test\.go$/, directories: ['tests/', 'test/'], type: 'Go test file', blockRoot: true },
+    { pattern: /test_.*\.py$/, directories: ['tests/', 'test/'], type: 'Python test file', blockRoot: true },
+    { pattern: /.*_test\.py$/, directories: ['tests/', 'test/'], type: 'Python test file', blockRoot: true },
 
-  // Source files
-  { pattern: /\.(ts|tsx)$/, directories: ['src/', 'lib/'], type: 'TypeScript source', blockRoot: true },
-  { pattern: /\.(js|jsx|mjs|cjs)$/, directories: ['src/', 'lib/', 'dist/'], type: 'JavaScript source', blockRoot: true },
-  { pattern: /\.py$/, directories: ['src/', 'lib/', 'app/'], type: 'Python source', blockRoot: true },
-  { pattern: /\.go$/, directories: ['cmd/', 'pkg/', 'internal/'], type: 'Go source', blockRoot: true },
-  { pattern: /\.rs$/, directories: ['src/'], type: 'Rust source', blockRoot: true },
-  { pattern: /\.java$/, directories: ['src/main/java/', 'src/'], type: 'Java source', blockRoot: true },
-  { pattern: /\.rb$/, directories: ['lib/', 'app/'], type: 'Ruby source', blockRoot: true },
-  { pattern: /\.php$/, directories: ['src/', 'app/'], type: 'PHP source', blockRoot: true },
-  { pattern: /\.cs$/, directories: ['src/'], type: 'C# source', blockRoot: true },
-  { pattern: /\.cpp?$/, directories: ['src/'], type: 'C/C++ source', blockRoot: true },
-  { pattern: /\.swift$/, directories: ['Sources/'], type: 'Swift source', blockRoot: true },
-  { pattern: /\.kt$/, directories: ['src/main/kotlin/', 'src/'], type: 'Kotlin source', blockRoot: true },
+    // Source files
+    { pattern: /\.(ts|tsx)$/, directories: ['src/', 'lib/'], type: 'TypeScript source', blockRoot: true },
+    { pattern: /\.(js|jsx|mjs|cjs)$/, directories: ['src/', 'lib/', 'dist/'], type: 'JavaScript source', blockRoot: true },
+    { pattern: /\.py$/, directories: ['src/', 'lib/', 'app/'], type: 'Python source', blockRoot: true },
+    { pattern: /\.go$/, directories: ['cmd/', 'pkg/', 'internal/'], type: 'Go source', blockRoot: true },
+    { pattern: /\.rs$/, directories: ['src/'], type: 'Rust source', blockRoot: true },
+    { pattern: /\.java$/, directories: ['src/main/java/', 'src/'], type: 'Java source', blockRoot: true },
+    { pattern: /\.rb$/, directories: ['lib/', 'app/'], type: 'Ruby source', blockRoot: true },
+    { pattern: /\.php$/, directories: ['src/', 'app/'], type: 'PHP source', blockRoot: true },
+    { pattern: /\.cs$/, directories: ['src/'], type: 'C# source', blockRoot: true },
+    { pattern: /\.cpp?$/, directories: ['src/'], type: 'C/C++ source', blockRoot: true },
+    { pattern: /\.swift$/, directories: ['Sources/'], type: 'Swift source', blockRoot: true },
+    { pattern: /\.kt$/, directories: ['src/main/kotlin/', 'src/'], type: 'Kotlin source', blockRoot: true },
 
-  // Config files (usually allowed at root)
-  { pattern: /\.(json|yaml|yml|toml)$/, directories: ['config/', './', 'configs/'], type: 'config file', blockRoot: false },
-  { pattern: /\.(env|env\.[a-z]+)$/, directories: ['./'], type: 'environment file', blockRoot: false },
+    // Config files (usually allowed at root)
+    { pattern: /\.(json|yaml|yml|toml)$/, directories: ['config/', './', 'configs/'], type: 'config file', blockRoot: false },
+    { pattern: /\.(env|env\.[a-z]+)$/, directories: ['./'], type: 'environment file', blockRoot: false },
 
-  // Documentation
-  { pattern: /\.md$/, directories: ['docs/', './'], type: 'Markdown documentation', blockRoot: false },
-  { pattern: /\.rst$/, directories: ['docs/'], type: 'reStructuredText documentation', blockRoot: true },
-  { pattern: /\.adoc$/, directories: ['docs/'], type: 'AsciiDoc documentation', blockRoot: true },
+    // Documentation
+    { pattern: /\.md$/, directories: ['docs/', './'], type: 'Markdown documentation', blockRoot: false },
+    { pattern: /\.rst$/, directories: ['docs/'], type: 'reStructuredText documentation', blockRoot: true },
+    { pattern: /\.adoc$/, directories: ['docs/'], type: 'AsciiDoc documentation', blockRoot: true },
 
-  // Assets
-  { pattern: /\.(css|scss|sass|less)$/, directories: ['styles/', 'src/styles/', 'assets/css/'], type: 'stylesheet', blockRoot: true },
-  { pattern: /\.(png|jpg|jpeg|gif|svg|ico)$/, directories: ['assets/', 'public/', 'images/', 'static/'], type: 'image', blockRoot: true },
-  { pattern: /\.(woff2?|ttf|otf|eot)$/, directories: ['assets/fonts/', 'fonts/', 'public/fonts/'], type: 'font', blockRoot: true },
+    // Assets
+    { pattern: /\.(css|scss|sass|less)$/, directories: ['styles/', 'src/styles/', 'assets/css/'], type: 'stylesheet', blockRoot: true },
+    { pattern: /\.(png|jpg|jpeg|gif|svg|ico)$/, directories: ['assets/', 'public/', 'images/', 'static/'], type: 'image', blockRoot: true },
+    { pattern: /\.(woff2?|ttf|otf|eot)$/, directories: ['assets/fonts/', 'fonts/', 'public/fonts/'], type: 'font', blockRoot: true },
 
-  // Scripts
-  { pattern: /\.sh$/, directories: ['scripts/', 'bin/'], type: 'shell script', blockRoot: true },
-  { pattern: /\.ps1$/, directories: ['scripts/', 'bin/'], type: 'PowerShell script', blockRoot: true },
+    // Scripts
+    { pattern: /\.sh$/, directories: ['scripts/', 'bin/'], type: 'shell script', blockRoot: true },
+    { pattern: /\.ps1$/, directories: ['scripts/', 'bin/'], type: 'PowerShell script', blockRoot: true },
 
-  // Data
-  { pattern: /\.sql$/, directories: ['migrations/', 'db/', 'database/'], type: 'SQL file', blockRoot: true },
-  { pattern: /\.csv$/, directories: ['data/', 'fixtures/', 'test/fixtures/'], type: 'CSV data', blockRoot: true },
-];
+    // Data
+    { pattern: /\.sql$/, directories: ['migrations/', 'db/', 'database/'], type: 'SQL file', blockRoot: true },
+    { pattern: /\.csv$/, directories: ['data/', 'fixtures/', 'test/fixtures/'], type: 'CSV data', blockRoot: true },
+  ];
 
 /**
  * Formatter recommendations by file extension
@@ -191,11 +191,11 @@ const NAMING_CONVENTIONS: Array<{
   /** File types this applies to */
   fileTypes: RegExp;
 }> = [
-  { pattern: /^[a-z][a-z0-9-]*\.[a-z]+$/, convention: 'kebab-case', fileTypes: /\.(tsx?|jsx?|css|scss)$/ },
-  { pattern: /^[a-z][a-z0-9_]*\.[a-z]+$/, convention: 'snake_case', fileTypes: /\.py$/ },
-  { pattern: /^[a-z][a-z0-9_]*\.[a-z]+$/, convention: 'snake_case', fileTypes: /\.go$/ },
-  { pattern: /^[A-Z][a-zA-Z0-9]*\.[a-z]+$/, convention: 'PascalCase', fileTypes: /\.(java|kt|cs)$/ },
-];
+    { pattern: /^[a-z][a-z0-9-]*\.[a-z]+$/, convention: 'kebab-case', fileTypes: /\.(tsx?|jsx?|css|scss)$/ },
+    { pattern: /^[a-z][a-z0-9_]*\.[a-z]+$/, convention: 'snake_case', fileTypes: /\.py$/ },
+    { pattern: /^[a-z][a-z0-9_]*\.[a-z]+$/, convention: 'snake_case', fileTypes: /\.go$/ },
+    { pattern: /^[A-Z][a-zA-Z0-9]*\.[a-z]+$/, convention: 'PascalCase', fileTypes: /\.(java|kt|cs)$/ },
+  ];
 
 /**
  * File Organization Hook Manager
@@ -259,7 +259,7 @@ export class FileOrganizationHook {
       blocked = true;
       blockReason = `Source files should not be written to root folder. Suggested: ${fileTypeInfo.directories[0]}`;
       suggestedDirectory = fileTypeInfo.directories[0];
-      suggestedPath = path.join(suggestedDirectory, fileName);
+      suggestedPath = path.join(suggestedDirectory, fileName).replace(/\\/g, '/');
 
       issues.push({
         type: 'root-write',
@@ -330,9 +330,9 @@ export class FileOrganizationHook {
   private isRootDirectory(dirName: string): boolean {
     const normalized = this.normalizePath(dirName);
     return normalized === '.' ||
-           normalized === './' ||
-           normalized === '' ||
-           normalized === this.normalizePath(this.projectRoot);
+      normalized === './' ||
+      normalized === '' ||
+      normalized === this.normalizePath(this.projectRoot);
   }
 
   /**

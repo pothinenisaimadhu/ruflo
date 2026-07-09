@@ -1,0 +1,36 @@
+{
+  "folders": [
+    {
+      "name": "🌊 RuFlo v3.5 — Code",
+      "path": "."
+    },
+    {
+      "name": "📓 Obsidian Vault — RuFlo Docs",
+      "path": "C:\\Users\\saima\\Documents\\Obsidian Vault\\Vault_complete"
+    }
+  ],
+  "settings": {
+    "files.associations": {
+      "*.md": "markdown"
+    },
+    "markdown.preview.breaks": true,
+    "editor.wordWrap": "on",
+    "files.exclude": {
+      "**/.git": true,
+      "**/.obsidian": false
+    },
+    "search.exclude": {
+      "**/node_modules": true,
+      "**/dist": true,
+      "**/build": true
+    },
+    "amazonQ.workspaceContext": true
+  },
+  "extensions": {
+    "recommendations": [
+      "yzhang.markdown-all-in-one",
+      "shd101wyy.markdown-preview-enhanced",
+      "amazonwebservices.amazon-q-vscode"
+    ]
+  }
+}

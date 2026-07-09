@@ -2,11 +2,13 @@ FROM node:20-slim
 
 WORKDIR /app
 
+# Python + build tools needed for agentic-flow's hnswlib-node native addon
+RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
+
 COPY package.json ./
 RUN npm install --production
 
-# Pre-install MCP backends for faster startup (avoids npx download on first call)
-# Each installed separately so one failure doesn't block others
+# Pre-install MCP backends
 RUN npm install -g ruvector || true
 RUN npm install -g ruflo || true
 RUN npm install -g agentic-flow@alpha || true
@@ -34,12 +36,12 @@ ENV MCP_GROUP_AGENTS=true
 ENV MCP_GROUP_MEMORY=true
 ENV MCP_GROUP_DEVTOOLS=true
 # Opt-in tool groups
-ENV MCP_GROUP_SECURITY=false
-ENV MCP_GROUP_BROWSER=false
-ENV MCP_GROUP_NEURAL=false
-ENV MCP_GROUP_AGENTIC_FLOW=false
+ENV MCP_GROUP_SECURITY=true
+ENV MCP_GROUP_BROWSER=true
+ENV MCP_GROUP_NEURAL=true
+ENV MCP_GROUP_AGENTIC_FLOW=true
 ENV MCP_GROUP_CLAUDE_CODE=false
-ENV MCP_GROUP_GEMINI=false
-ENV MCP_GROUP_CODEX=false
+ENV MCP_GROUP_GEMINI=true
+ENV MCP_GROUP_CODEX=true
 
 CMD ["node", "index.js"]

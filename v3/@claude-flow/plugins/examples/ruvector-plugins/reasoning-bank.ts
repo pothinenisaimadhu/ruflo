@@ -438,6 +438,9 @@ async function getReasoningBank(): Promise<ReasoningBank> {
 }
 
 export const reasoningBankPlugin = new PluginBuilder('reasoning-bank', '1.0.0')
+  .withId('ruvector-reasoning-bank')
+  .withName('RuVector Reasoning Bank')
+  .withCapabilities(['vector-search', 'learning', 'reasoning'])
   .withDescription('Store and retrieve reasoning trajectories using @ruvector/wasm HNSW indexing')
   .withAuthor('Claude Flow Team')
   .withTags(['reasoning', 'memory', 'learning', 'ruvector', 'hnsw'])
